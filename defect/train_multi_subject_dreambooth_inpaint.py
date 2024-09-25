@@ -728,12 +728,14 @@ class DreamBoothDataset(Dataset):
         self.center_crop = center_crop
         self.tokenizer = tokenizer
 
-        # Initialize instance and class data lists
         self.instance_data_root = []
+        self.instance_images_path = []
+        self.num_instance_images = []
         self.instance_prompt = []
         self.class_data_root = [] if class_data_root is not None else None
+        self.class_images_path = []
+        self.num_class_images = []
         self.class_prompt = []
-
         self._length = 0
 
         for i in range(len(instance_data_root)):
@@ -756,7 +758,6 @@ class DreamBoothDataset(Dataset):
                     self._length += self.num_class_images[i]
                 self.class_prompt.append(class_prompt[i])
 
-        # Define image transformations
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -766,8 +767,10 @@ class DreamBoothDataset(Dataset):
             ]
         )
 
+
     def __len__(self):
         return self._length
+
 
     def __getitem__(self, index):
         example = {}
