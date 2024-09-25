@@ -773,13 +773,13 @@ class DreamBoothDataset(Dataset):
 
     def __getitem__(self, index):
         example = {}
-        for i in range(len(self.instance_images_paths)):
-            instance_image = Image.open(self.instance_images_paths[i][index % self.num_instance_images[i]])
+        for i in range(len(self.instance_images_path)):
+            instance_image = Image.open(self.instance_images_path[i][index % self.num_instance_images[i]])
             if not instance_image.mode == "RGB":
                 instance_image = instance_image.convert("RGB")
             example[f"instance_images_{i}"] = self.image_transforms(instance_image)
             example[f"instance_prompt_ids_{i}"] = self.tokenizer(
-                self.instance_prompts[i],
+                self.instance_prompt[i],
                 truncation=True,
                 padding="max_length",
                 max_length=self.tokenizer.model_max_length,
@@ -789,14 +789,14 @@ class DreamBoothDataset(Dataset):
             # 추가: PIL 이미지를 저장하여 collate_fn에서 참조할 수 있도록 한다
             example[f"PIL_images_{i}"] = instance_image
 
-        if self.class_data_roots:
-            for i in range(len(self.class_data_roots)):
-                class_image = Image.open(self.class_images_paths[i][index % self.num_class_images[i]])
+        if self.class_data_root:
+            for i in range(len(self.class_data_root)):
+                class_image = Image.open(self.class_images_path[i][index % self.num_class_images[i]])
                 if not class_image.mode == "RGB":
                     class_image = class_image.convert("RGB")
                 example[f"class_images_{i}"] = self.image_transforms(class_image)
                 example[f"class_prompt_ids_{i}"] = self.tokenizer(
-                    self.class_prompts[i],
+                    self.class_prompt[i],
                     truncation=True,
                     padding="max_length",
                     max_length=self.tokenizer.model_max_length,
