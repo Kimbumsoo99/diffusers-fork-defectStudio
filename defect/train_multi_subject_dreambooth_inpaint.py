@@ -1401,60 +1401,71 @@ def main(args):
     def collate_fn(examples):
         input_ids = []
         pixel_values = []
-
-        # Concat class and instance examples for prior preservation.
-        if args.with_prior_preservation:
-            pior_pil = []
-
         masks = []
         masked_images = []
 
-        # Iterate through the concepts in examples
+        # Debug print: 전체 데이터셋에서 각 예시의 키와 길이 출력
         for example in examples:
-            for i in range(len(example) // 4):  # Assuming 4 keys for each concept (instance & class prompts, images)
-                # Process instance data
-                input_ids.append(example[f"instance_prompt_ids_{i}"])
-                pixel_values.append(example[f"instance_images_{i}"])
+            print(f"Example keys: {example.keys()}")
 
-                # Generate mask and masked images
-                pil_image = example[f"PIL_images_{i}"]
-                mask = random_mask(pil_image.size, 1, False)
-                mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+        # Collect all instance prompt ids and instance images
+        for example in examples:
+            for i in range(len(example.keys())):
+                if f"instance_prompt_ids_{i}" in example:
+                    print(f"Appending instance prompt ids for index {i}")
+                    input_ids.append(example[f"instance_prompt_ids_{i}"])  # Tokenized instance prompt
+                    pixel_values.append(example[f"instance_images_{i}"])  # Image tensor for instance
 
-                masks.append(mask)
-                masked_images.append(masked_image)
+        # If prior preservation is enabled, collect class prompt ids and class images
+        if args.with_prior_preservation:
+            for example in examples:
+                for i in range(len(example.keys())):
+                    if f"class_prompt_ids_{i}" in example:
+                        print(f"Appending class prompt ids for index {i}")
+                        input_ids.append(example[f"class_prompt_ids_{i}"])  # Tokenized class prompt
+                        pixel_values.append(example[f"class_images_{i}"])  # Image tensor for class
+                    if f"class_PIL_images_{i}" in example:
+                        print(f"Generating mask for class image index {i}")
+                        # Generate a random mask and prepare masked image for class images
+                        mask = random_mask(example[f"class_PIL_images_{i}"].size, 1, False)
+                        mask, masked_image = prepare_mask_and_masked_image(example[f"class_PIL_images_{i}"], mask)
+                        masks.append(mask)
+                        masked_images.append(masked_image)
 
-                # Process class data if prior preservation is enabled
-                if args.with_prior_preservation:
-                    input_ids.append(example[f"class_prompt_ids_{i}"])
-                    pixel_values.append(example[f"class_images_{i}"])
+        # Debug print: 데이터의 길이 출력
+        print(f"Total input_ids length: {len(input_ids)}")
+        print(f"Total pixel_values length: {len(pixel_values)}")
+        if masks:
+            print(f"Total masks length: {len(masks)}")
+        if masked_images:
+            print(f"Total masked_images length: {len(masked_images)}")
 
-                    class_pil_image = example[f"class_PIL_images_{i}"]
-                    pior_pil.append(class_pil_image)
-
-                    # Generate mask for class images
-                    mask = random_mask(class_pil_image.size, 1, False)
-                    mask, masked_image = prepare_mask_and_masked_image(class_pil_image, mask)
-
-                    masks.append(mask)
-                    masked_images.append(masked_image)
-
-        # Stack all pixel values and masks
+        # Stack the tensors for batch processing
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
+        # Tokenize the input_ids and handle padding
         input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-        masks = torch.stack(masks)
-        masked_images = torch.stack(masked_images)
 
-        # Prepare the final batch
+        # Stack masks and masked images
+        masks = torch.stack(masks) if masks else None
+        masked_images = torch.stack(masked_images) if masked_images else None
+
+        # Debug print: 최종 데이터의 shape 출력
+        print(f"Stacked pixel_values shape: {pixel_values.shape}")
+        print(f"Stacked input_ids shape: {input_ids.shape}")
+        if masks is not None:
+            print(f"Stacked masks shape: {masks.shape}")
+        if masked_images is not None:
+            print(f"Stacked masked_images shape: {masked_images.shape}")
+
+        # Return the batch in dictionary format
         batch = {
             "input_ids": input_ids,
             "pixel_values": pixel_values,
             "masks": masks,
             "masked_images": masked_images
         }
-
         return batch
 
     train_dataloader = torch.utils.data.DataLoader(
