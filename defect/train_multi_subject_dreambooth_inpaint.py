@@ -292,6 +292,7 @@ def parse_args(input_args=None):
         default=None,
         help="Pretrained tokenizer name or path if not the same as model_name",
     )
+    # concept list or instance_data_dir
     parser.add_argument(
         "--instance_data_dir",
         type=str,
