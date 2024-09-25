@@ -1627,24 +1627,13 @@ def main(args):
                 # Concatenate the noised latents with the mask and the masked latents
                 latent_model_input = torch.cat([noisy_latents, mask, masked_latents], dim=1)
 
-                # Get text embedding for conditioning
-                if args.pre_compute_text_embeddings:
-                    encoder_hidden_states = batch["input_ids"]
-                else:
-                    encoder_hidden_states = encode_prompt(
-                        text_encoder,
-                        batch["input_ids"],
-                        batch["attention_mask"],
-                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
-                    )
-
                 # U-Net 채널 크기와 Latents 크기 일치 확인
                 if unwrap_model(unet).config.in_channels == latents.shape[1] * 2:
                     latent_model_input = torch.cat([latent_model_input, latent_model_input], dim=1)
 
                 # Class labels conditioning (e.g., timesteps) for diffusion model
                 class_labels = timesteps if args.class_labels_conditioning == "timesteps" else None
-
+                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
                 # Predict the noise residual
                 noise_pred = unet(
                     latent_model_input, timesteps, encoder_hidden_states, class_labels=class_labels, return_dict=False
