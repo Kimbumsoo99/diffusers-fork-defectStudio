@@ -1405,14 +1405,14 @@ def main(args):
         masked_images = []
 
         # Debug print: 전체 데이터셋에서 각 예시의 키와 길이 출력
-        for example in examples:
-            print(f"Example keys: {example.keys()}")
+        # for example in examples:
+        #     print(f"Example keys: {example.keys()}")
 
         # Collect all instance prompt ids and instance images
         for example in examples:
             for i in range(len(example.keys())):
                 if f"instance_prompt_ids_{i}" in example:
-                    print(f"Appending instance prompt ids for index {i}")
+                    # print(f"Appending instance prompt ids for index {i}")
                     input_ids.append(example[f"instance_prompt_ids_{i}"])  # Tokenized instance prompt
                     pixel_values.append(example[f"instance_images_{i}"])  # Image tensor for instance
 
@@ -1421,11 +1421,11 @@ def main(args):
             for example in examples:
                 for i in range(len(example.keys())):
                     if f"class_prompt_ids_{i}" in example:
-                        print(f"Appending class prompt ids for index {i}")
+                        # print(f"Appending class prompt ids for index {i}")
                         input_ids.append(example[f"class_prompt_ids_{i}"])  # Tokenized class prompt
                         pixel_values.append(example[f"class_images_{i}"])  # Image tensor for class
                     if f"class_PIL_images_{i}" in example:
-                        print(f"Generating mask for class image index {i}")
+                        # print(f"Generating mask for class image index {i}")
                         # Generate a random mask and resize the mask to the target resolution
                         mask = random_mask(example[f"class_PIL_images_{i}"].size, 1, False)
                         mask, masked_image = prepare_mask_and_masked_image(example[f"class_PIL_images_{i}"], mask)
@@ -1443,12 +1443,12 @@ def main(args):
         masked_images = masked_images * 2
 
         # Debug print: 데이터의 길이 출력
-        print(f"Total input_ids length: {len(input_ids)}")
-        print(f"Total pixel_values length: {len(pixel_values)}")
-        if masks:
-            print(f"Total masks length: {len(masks)}")
-        if masked_images:
-            print(f"Total masked_images length: {len(masked_images)}")
+        # print(f"Total input_ids length: {len(input_ids)}")
+        # print(f"Total pixel_values length: {len(pixel_values)}")
+        # if masks:
+        #     print(f"Total masks length: {len(masks)}")
+        # if masked_images:
+        #     print(f"Total masked_images length: {len(masked_images)}")
 
         # Stack the tensors for batch processing
         pixel_values = torch.stack(pixel_values)
@@ -1462,12 +1462,12 @@ def main(args):
         masked_images = torch.stack(masked_images) if masked_images else None
 
         # Debug print: 최종 데이터의 shape 출력
-        print(f"Stacked pixel_values shape: {pixel_values.shape}")
-        print(f"Stacked input_ids shape: {input_ids.shape}")
-        if masks is not None:
-            print(f"Stacked masks shape: {masks.shape}")
-        if masked_images is not None:
-            print(f"Stacked masked_images shape: {masked_images.shape}")
+        # print(f"Stacked pixel_values shape: {pixel_values.shape}")
+        # print(f"Stacked input_ids shape: {input_ids.shape}")
+        # if masks is not None:
+        #     print(f"Stacked masks shape: {masks.shape}")
+        # if masked_images is not None:
+        #     print(f"Stacked masked_images shape: {masked_images.shape}")
 
         # Return the batch in dictionary format
         batch = {
@@ -1611,8 +1611,8 @@ def main(args):
                 mask = torch.stack(resized_masks)
 
                 # 결합 전 크기 디버깅
-                print(
-                    f"Latents shape: {latents.shape}, Mask shape: {mask.shape}, Masked latents shape: {masked_latents.shape}")
+                # print(
+                #     f"Latents shape: {latents.shape}, Mask shape: {mask.shape}, Masked latents shape: {masked_latents.shape}")
 
                 mask = mask.reshape(-1, 1, latents.shape[2], latents.shape[3])
 
