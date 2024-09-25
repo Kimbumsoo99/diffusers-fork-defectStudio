@@ -1438,6 +1438,10 @@ def main(args):
                         masks.append(mask)
                         masked_images.append(masked_image)
 
+        # Fix: 두 배로 확장하여 모든 인스턴스와 클래스에 맞게 크기를 일치
+        masks = masks * 2
+        masked_images = masked_images * 2
+
         # Debug print: 데이터의 길이 출력
         print(f"Total input_ids length: {len(input_ids)}")
         print(f"Total pixel_values length: {len(pixel_values)}")
