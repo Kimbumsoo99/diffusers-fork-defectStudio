@@ -296,7 +296,7 @@ def parse_args(input_args=None):
         "--instance_data_dir",
         type=str,
         default=None,
-        required=True,
+        required=False,
         help="A folder containing the training data of instance images.",
     )
     parser.add_argument(
@@ -310,7 +310,7 @@ def parse_args(input_args=None):
         "--instance_prompt",
         type=str,
         default=None,
-        required=True,
+        required=False,
         help="The prompt with identifier specifying the instance",
     )
     parser.add_argument(
