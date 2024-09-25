@@ -1635,9 +1635,7 @@ def main(args):
                 class_labels = timesteps if args.class_labels_conditioning == "timesteps" else None
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
                 # Predict the noise residual
-                noise_pred = unet(
-                    latent_model_input, timesteps, encoder_hidden_states, class_labels=class_labels, return_dict=False
-                )[0]
+                noise_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
