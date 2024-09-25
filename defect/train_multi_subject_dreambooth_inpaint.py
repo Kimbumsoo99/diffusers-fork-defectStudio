@@ -1402,10 +1402,10 @@ def main(args):
 
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(
-        instance_data_root=args.instance_data_dir,
-        instance_prompt=args.instance_prompt,
-        class_data_root=args.class_data_dir if args.with_prior_preservation else None,
-        class_prompt=args.class_prompt,
+        instance_data_root=instance_data_dir,
+        instance_prompt=instance_prompt,
+        class_data_root=class_data_dir if args.with_prior_preservation else None,
+        class_prompt=class_prompt,
         tokenizer=tokenizer,
         size=args.resolution,
         center_crop=args.center_crop,
