@@ -1138,7 +1138,15 @@ def main(args):
             ), "The length of negative prompts for validation is greater than the number of validation prompts."
             args.validation_inference_steps = [args.validation_inference_steps] * num_of_validation_prompts
             args.validation_guidance_scale = [args.validation_guidance_scale] * num_of_validation_prompts
+
+    print("-- concepts list --")
+    print(instance_data_dir)
+    print(instance_prompt)
+    print(class_data_dir)
+    print(class_prompt)
+    print("-- concepts list --")
     # end
+
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
