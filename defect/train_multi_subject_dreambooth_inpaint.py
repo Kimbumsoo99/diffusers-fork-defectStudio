@@ -1426,9 +1426,15 @@ def main(args):
                         pixel_values.append(example[f"class_images_{i}"])  # Image tensor for class
                     if f"class_PIL_images_{i}" in example:
                         print(f"Generating mask for class image index {i}")
-                        # Generate a random mask and prepare masked image for class images
+                        # Generate a random mask and resize the mask to the target resolution
                         mask = random_mask(example[f"class_PIL_images_{i}"].size, 1, False)
                         mask, masked_image = prepare_mask_and_masked_image(example[f"class_PIL_images_{i}"], mask)
+
+                        # 마스크를 고정된 크기(예: 512x512)로 리사이즈
+                        mask = torch.nn.functional.interpolate(mask, size=(args.resolution, args.resolution))
+                        masked_image = torch.nn.functional.interpolate(masked_image,
+                                                                       size=(args.resolution, args.resolution))
+
                         masks.append(mask)
                         masked_images.append(masked_image)
 
