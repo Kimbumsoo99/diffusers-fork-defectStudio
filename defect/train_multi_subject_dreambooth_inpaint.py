@@ -1393,45 +1393,62 @@ def main(args):
     )
 
     def collate_fn(examples):
-        input_ids = [example["instance_prompt_ids"] for example in examples]
-        pixel_values = [example["instance_images"] for example in examples]
+        input_ids = []
+        pixel_values = []
 
         # Concat class and instance examples for prior preservation.
-        # We do this to avoid doing two forward passes.
         if args.with_prior_preservation:
-            input_ids += [example["class_prompt_ids"] for example in examples]
-            pixel_values += [example["class_images"] for example in examples]
-            pior_pil = [example["class_PIL_images"] for example in examples]
+            pior_pil = []
 
         masks = []
         masked_images = []
+
+        # Iterate through the concepts in examples
         for example in examples:
-            pil_image = example["PIL_images"]
-            # generate a random mask
-            mask = random_mask(pil_image.size, 1, False)
-            # prepare mask and masked image
-            mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+            for i in range(len(example) // 4):  # Assuming 4 keys for each concept (instance & class prompts, images)
+                # Process instance data
+                input_ids.append(example[f"instance_prompt_ids_{i}"])
+                pixel_values.append(example[f"instance_images_{i}"])
 
-            masks.append(mask)
-            masked_images.append(masked_image)
-
-        if args.with_prior_preservation:
-            for pil_image in pior_pil:
-                # generate a random mask
+                # Generate mask and masked images
+                pil_image = example[f"PIL_images_{i}"]
                 mask = random_mask(pil_image.size, 1, False)
-                # prepare mask and masked image
                 mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
 
                 masks.append(mask)
                 masked_images.append(masked_image)
 
+                # Process class data if prior preservation is enabled
+                if args.with_prior_preservation:
+                    input_ids.append(example[f"class_prompt_ids_{i}"])
+                    pixel_values.append(example[f"class_images_{i}"])
+
+                    class_pil_image = example[f"class_PIL_images_{i}"]
+                    pior_pil.append(class_pil_image)
+
+                    # Generate mask for class images
+                    mask = random_mask(class_pil_image.size, 1, False)
+                    mask, masked_image = prepare_mask_and_masked_image(class_pil_image, mask)
+
+                    masks.append(mask)
+                    masked_images.append(masked_image)
+
+        # Stack all pixel values and masks
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
         input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
-        batch = {"input_ids": input_ids, "pixel_values": pixel_values, "masks": masks, "masked_images": masked_images}
+
+        # Prepare the final batch
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+            "masks": masks,
+            "masked_images": masked_images
+        }
+
         return batch
 
     train_dataloader = torch.utils.data.DataLoader(
