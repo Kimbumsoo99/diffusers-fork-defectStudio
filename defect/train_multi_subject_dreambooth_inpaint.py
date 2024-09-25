@@ -716,11 +716,11 @@ class DreamBoothDataset(Dataset):
 
     def __init__(
             self,
-            instance_data_roots,
-            instance_prompts,
+            instance_data_root,
+            instance_prompt,
             tokenizer,
-            class_data_roots=None,
-            class_prompts=None,
+            class_data_root=None,
+            class_prompt=None,
             size=512,
             center_crop=False,
     ):
@@ -729,52 +729,38 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
 
         # Initialize instance and class data lists
-        self.instance_data_roots = []
-        self.instance_images_paths = []
-        self.num_instance_images = []
-        self.instance_prompts = []
-        self.class_data_roots = [] if class_data_roots is not None else None
-        self.class_images_paths = []
-        self.num_class_images = []
-        self.class_prompts = []
+        self.instance_data_root = []
+        self.instance_prompt = []
+        self.class_data_root = [] if class_data_root is not None else None
+        self.class_prompt = []
 
         self._length = 0
 
-        # Iterate over the instance data roots and prompts
-        for i, instance_data_root in enumerate(instance_data_roots):
-            instance_root = Path(instance_data_root)
-            if not instance_root.exists():
-                raise ValueError(f"Instance images root {instance_data_root} doesn't exist.")
+        for i in range(len(instance_data_root)):
+            self.instance_data_root.append(Path(instance_data_root[i]))
+            if not self.instance_data_root[i].exists():
+                raise ValueError("Instance images root doesn't exists.")
 
-            # Append instance data and prompts
-            self.instance_data_roots.append(instance_root)
-            self.instance_images_paths.append(list(instance_root.iterdir()))
-            self.num_instance_images.append(len(self.instance_images_paths[i]))
-            self.instance_prompts.append(instance_prompts[i])
+            self.instance_images_path.append(list(Path(instance_data_root[i]).iterdir()))
+            self.num_instance_images.append(len(self.instance_images_path[i]))
+            self.instance_prompt.append(instance_prompt[i])
             self._length += self.num_instance_images[i]
 
-            # Handle class data if provided
-            if class_data_roots is not None:
-                class_root = Path(class_data_roots[i])
-                class_root.mkdir(parents=True, exist_ok=True)
-                self.class_data_roots.append(class_root)
-                self.class_images_paths.append(list(class_root.iterdir()))
-                self.num_class_images.append(len(self.class_images_paths[i]))
+            if class_data_root is not None:
+                self.class_data_root.append(Path(class_data_root[i]))
+                self.class_data_root[i].mkdir(parents=True, exist_ok=True)
+                self.class_images_path.append(list(self.class_data_root[i].iterdir()))
+                self.num_class_images.append(len(self.class_images_path))
                 if self.num_class_images[i] > self.num_instance_images[i]:
                     self._length -= self.num_instance_images[i]
                     self._length += self.num_class_images[i]
-                self.class_prompts.append(class_prompts[i])
+                self.class_prompt.append(class_prompt[i])
 
         # Define image transformations
-        self.image_transforms_resize_and_crop = transforms.Compose(
+        self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
                 transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
-            ]
-        )
-
-        self.image_transforms = transforms.Compose(
-            [
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -784,49 +770,33 @@ class DreamBoothDataset(Dataset):
         return self._length
 
     def __getitem__(self, index):
-        # Determine which concept to use (loop through concepts using modulo)
-        concept_idx = 0
-        for i, num_images in enumerate(self.num_instance_images):
-            if index < num_images:
-                concept_idx = i
-                break
-            index -= num_images
-
         example = {}
-        # Load instance image and apply transforms
-        instance_image = Image.open(
-            self.instance_images_paths[concept_idx][index % self.num_instance_images[concept_idx]])
-        if not instance_image.mode == "RGB":
-            instance_image = instance_image.convert("RGB")
-        instance_image = self.image_transforms_resize_and_crop(instance_image)
-
-        example["PIL_images"] = instance_image
-        example["instance_images"] = self.image_transforms(instance_image)
-
-        # Tokenize instance prompt
-        example["instance_prompt_ids"] = self.tokenizer(
-            self.instance_prompts[concept_idx],
-            padding="do_not_pad",
-            truncation=True,
-            max_length=self.tokenizer.model_max_length,
-        ).input_ids
-
-        # Load class image and apply transforms if class data exists
-        if self.class_data_roots:
-            class_image = Image.open(self.class_images_paths[concept_idx][index % self.num_class_images[concept_idx]])
-            if not class_image.mode == "RGB":
-                class_image = class_image.convert("RGB")
-            class_image = self.image_transforms_resize_and_crop(class_image)
-            example["class_images"] = self.image_transforms(class_image)
-            example["class_PIL_images"] = class_image
-
-            # Tokenize class prompt
-            example["class_prompt_ids"] = self.tokenizer(
-                self.class_prompts[concept_idx],
-                padding="do_not_pad",
+        for i in range(len(self.instance_images_path)):
+            instance_image = Image.open(self.instance_images_path[i][index % self.num_instance_images[i]])
+            if not instance_image.mode == "RGB":
+                instance_image = instance_image.convert("RGB")
+            example[f"instance_images_{i}"] = self.image_transforms(instance_image)
+            example[f"instance_prompt_ids_{i}"] = self.tokenizer(
+                self.instance_prompt[i],
                 truncation=True,
+                padding="max_length",
                 max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
             ).input_ids
+
+        if self.class_data_root:
+            for i in range(len(self.class_data_root)):
+                class_image = Image.open(self.class_images_path[i][index % self.num_class_images[i]])
+                if not class_image.mode == "RGB":
+                    class_image = class_image.convert("RGB")
+                example[f"class_images_{i}"] = self.image_transforms(class_image)
+                example[f"class_prompt_ids_{i}"] = self.tokenizer(
+                    self.class_prompt[i],
+                    truncation=True,
+                    padding="max_length",
+                    max_length=self.tokenizer.model_max_length,
+                    return_tensors="pt",
+                ).input_ids
 
         return example
 
