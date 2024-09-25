@@ -1606,7 +1606,7 @@ def main(args):
                     resized_masks.append(resized_mask)
 
                     # 마스크 크기 디버깅
-                    print(f"Original mask size: {mask.shape}, Resized mask size: {resized_mask.shape}")
+                    # print(f"Original mask size: {mask.shape}, Resized mask size: {resized_mask.shape}")
 
                 mask = torch.stack(resized_masks)
 
