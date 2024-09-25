@@ -1574,9 +1574,10 @@ def main(args):
         unet.train()
         if args.train_text_encoder:
             text_encoder.train()
+
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet):
-                # Convert images to latent space for inpainting
+                # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
@@ -1588,13 +1589,22 @@ def main(args):
 
                 # Resize the mask to match the latents shape
                 masks = batch["masks"]
-                mask = torch.stack(
-                    [
-                        torch.nn.functional.interpolate(mask, size=(args.resolution // 8, args.resolution // 8))
-                        for mask in masks
-                    ]
-                )
-                mask = mask.reshape(-1, 1, args.resolution // 8, args.resolution // 8)
+                resized_masks = []
+                for mask in masks:
+                    # 마스크를 latent 크기에 맞게 조정
+                    resized_mask = torch.nn.functional.interpolate(mask, size=(latents.shape[2], latents.shape[3]))
+                    resized_masks.append(resized_mask)
+
+                    # 마스크 크기 디버깅
+                    print(f"Original mask size: {mask.shape}, Resized mask size: {resized_mask.shape}")
+
+                mask = torch.stack(resized_masks)
+
+                # 결합 전 크기 디버깅
+                print(
+                    f"Latents shape: {latents.shape}, Mask shape: {mask.shape}, Masked latents shape: {masked_latents.shape}")
+
+                mask = mask.reshape(-1, 1, latents.shape[2], latents.shape[3])
 
                 # Sample noise and add to latents
                 noise = torch.randn_like(latents)
@@ -1618,7 +1628,7 @@ def main(args):
                         text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
                     )
 
-                # If U-Net input channels match, concatenate latents
+                # U-Net 채널 크기와 Latents 크기 일치 확인
                 if unwrap_model(unet).config.in_channels == latents.shape[1] * 2:
                     latent_model_input = torch.cat([latent_model_input, latent_model_input], dim=1)
 
@@ -1682,43 +1692,6 @@ def main(args):
 
             if global_step >= args.max_train_steps:
                 break
-
-    # Create and save the pipeline after training
-    accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        pipeline_args = {"unet": unwrap_model(unet)}
-        if text_encoder is not None:
-            pipeline_args["text_encoder"] = unwrap_model(text_encoder)
-
-        if args.skip_save_text_encoder:
-            pipeline_args["text_encoder"] = None
-
-        pipeline = DiffusionPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            revision=args.revision,
-            variant=args.variant,
-            **pipeline_args,
-        )
-        pipeline.save_pretrained(args.output_dir)
-
-        if args.push_to_hub:
-            save_model_card(
-                repo_id,
-                images=None,
-                base_model=args.pretrained_model_name_or_path,
-                train_text_encoder=args.train_text_encoder,
-                prompt=args.instance_prompt,
-                repo_folder=args.output_dir,
-                pipeline=pipeline,
-            )
-            upload_folder(
-                repo_id=repo_id,
-                folder_path=args.output_dir,
-                commit_message="End of training",
-                ignore_patterns=["step_*", "epoch_*"],
-            )
-
-    accelerator.end_training()
 
 
 if __name__ == "__main__":
