@@ -775,16 +775,20 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-
+    print("input_ids before tokenization:", input_ids)
+    print("input_ids type:", type(input_ids))
+    if len(input_ids) > 0:
+        print("Sample input_ids type:", type(input_ids[0]))
 
     if args.is_inpaint:
         # Apply tokenizer padding and truncation for input_ids
-        input_ids = tokenizer(
-            input_ids, padding=True, truncation=True, return_tensors="pt"
-        ).input_ids
-
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
+
+        input_ids = tokenizer(
+            {"input_ids": input_ids}, padding=True, truncation=True, return_tensors="pt"
+        ).input_ids
+
         # 최종 배치 생성
         batch = {
             "input_ids": input_ids,
