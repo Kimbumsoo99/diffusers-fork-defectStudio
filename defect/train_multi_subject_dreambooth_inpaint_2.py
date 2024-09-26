@@ -743,52 +743,60 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
         input_ids += [example[f"instance_prompt_ids_{i}"] for example in examples]
         pixel_values += [example[f"instance_images_{i}"] for example in examples]
 
-        # PIL 이미지를 가져와서 마스크와 마스크된 이미지를 생성
-        for example in examples:
-            pil_image = example[f"PIL_images_{i}"]
-            # 마스크 생성 및 처리
-            mask = random_mask(pil_image.size, 1, False)
-            mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+        if args.is_inpaint:
+            # PIL 이미지를 가져와서 마스크와 마스크된 이미지를 생성
+            for example in examples:
+                pil_image = example[f"PIL_images_{i}"]
+                # 마스크 생성 및 처리
+                mask = random_mask(pil_image.size, 1, False)
+                mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
 
-            masks.append(mask)
-            masked_images.append(masked_image)
+                masks.append(mask)
+                masked_images.append(masked_image)
 
     # prior preservation이 활성화된 경우, 클래스 이미지 처리
     if with_prior_preservation:
         for i in range(num_instances):
             input_ids += [example[f"class_prompt_ids_{i}"] for example in examples]
             pixel_values += [example[f"class_images_{i}"] for example in examples]
-            pior_pil = [example[f"class_PIL_images_{i}"] for example in examples]
+            if args.is_inpaint:
+                pior_pil = [example[f"class_PIL_images_{i}"] for example in examples]
 
-        # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
-        for pil_image in pior_pil:
-            mask = random_mask(pil_image.size, 1, False)
-            mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+        if args.is_inpaint:
+            # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
+            for pil_image in pior_pil:
+                mask = random_mask(pil_image.size, 1, False)
+                mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
 
-            masks.append(mask)
-            masked_images.append(masked_image)
+                masks.append(mask)
+                masked_images.append(masked_image)
 
     # 이미지와 마스크 텐서로 변환
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    if tokenizer:
+
+
+    if args.is_inpaint:
         input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+
+        masks = torch.stack(masks)
+        masked_images = torch.stack(masked_images)
+        # 최종 배치 생성
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+            "masks": masks,
+            "masked_images": masked_images
+        }
+        return batch
     else:
         input_ids = torch.cat(input_ids, dim=0)
-
-    masks = torch.stack(masks)
-    masked_images = torch.stack(masked_images)
-
-    # 최종 배치 생성
-    batch = {
-        "input_ids": input_ids,
-        "pixel_values": pixel_values,
-        "masks": masks,
-        "masked_images": masked_images
-    }
-
-    return batch
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+        }
+        return batch
 
 
 class PromptDataset(Dataset):
