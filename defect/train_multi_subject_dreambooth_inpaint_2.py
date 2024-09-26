@@ -5,8 +5,8 @@ import logging
 import math
 import uuid
 import warnings
-from os import environ, listdir, makedirs
-from os.path import basename, join
+import os
+import random
 from pathlib import Path
 from typing import List
 
@@ -21,13 +21,13 @@ from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from huggingface_hub import create_repo, upload_folder
 from huggingface_hub.utils import insecure_hashlib
-from PIL import Image
+from PIL import Image, ImageDraw
 from torch import dtype
 from torch.nn import Module
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import AutoTokenizer, PretrainedConfig
+from transformers import AutoTokenizer, PretrainedConfig, CLIPTextModel, CLIPTokenizer
 
 import diffusers
 from diffusers import (
@@ -35,6 +35,8 @@ from diffusers import (
     DDPMScheduler,
     DiffusionPipeline,
     DPMSolverMultistepScheduler,
+    StableDiffusionInpaintPipeline,
+    StableDiffusionPipeline,
     UNet2DConditionModel,
 )
 from diffusers.optimization import get_scheduler
@@ -46,11 +48,50 @@ if is_wandb_available():
     import wandb
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.13.0.dev0")
+# check_min_version("0.13.0.dev0")
 
 logger = get_logger(__name__)
 
 
+def prepare_mask_and_masked_image(image, mask):
+    image = np.array(image.convert("RGB"))
+    image = image[None].transpose(0, 3, 1, 2)
+    image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0
+
+    mask = np.array(mask.convert("L"))
+    mask = mask.astype(np.float32) / 255.0
+    mask = mask[None, None]
+    mask[mask < 0.5] = 0
+    mask[mask >= 0.5] = 1
+    mask = torch.from_numpy(mask)
+    masked_image = image * (mask < 0.5)
+    return mask, masked_image
+
+# generate random masks
+def random_mask(im_shape, ratio=1, mask_full_image=False):
+    mask = Image.new("L", im_shape, 0)
+    draw = ImageDraw.Draw(mask)
+    size = (random.randint(0, int(im_shape[0] * ratio)), random.randint(0, int(im_shape[1] * ratio)))
+
+    # use this to always mask the whole image
+    if mask_full_image:
+        size = (int(im_shape[0] * ratio), int(im_shape[1] * ratio))
+
+    limits = (im_shape[0] - size[0] // 2, im_shape[1] - size[1] // 2)
+    center = (random.randint(size[0] // 2, limits[0]), random.randint(size[1] // 2, limits[1]))
+    draw_type = random.randint(0, 1)
+
+    if draw_type == 0 or mask_full_image:
+        draw.rectangle(
+            (center[0] - size[0] // 2, center[1] - size[1] // 2, center[0] + size[0] // 2, center[1] + size[1] // 2),
+            fill=255,
+        )
+    else:
+        draw.ellipse(
+            (center[0] - size[0] // 2, center[1] - size[1] // 2, center[0] + size[0] // 2, center[1] + size[1] // 2),
+            fill=255,
+        )
+    return mask
 def log_validation_images_to_tracker(
     images: List[np.array], label: str, validation_prompt: str, accelerator: Accelerator, epoch: int
 ):
@@ -544,9 +585,10 @@ def parse_args(input_args=None):
 
 class DreamBoothDataset(Dataset):
     """
-    멀티 콘셉트 지원을 위한 데이터셋 클래스.
-    여러 콘셉트에 대해 인스턴스 및 클래스 이미지를 처리합니다.
+    A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
+    It pre-processes the images and then tokenizes prompts.
     """
+
     def __init__(
         self,
         instance_data_root,
@@ -572,24 +614,33 @@ class DreamBoothDataset(Dataset):
         self._length = 0
 
         for i in range(len(instance_data_root)):
+            print(f"instance_data_root[i]: {instance_data_root[i]}")
             self.instance_data_root.append(Path(instance_data_root[i]))
             if not self.instance_data_root[i].exists():
                 raise ValueError("Instance images root doesn't exists.")
 
             self.instance_images_path.append(list(Path(instance_data_root[i]).iterdir()))
+            print(f"instance_images_path : {self.instance_images_path}")
             self.num_instance_images.append(len(self.instance_images_path[i]))
+            print(f"num_instance_images: {self.num_instance_images}")
             self.instance_prompt.append(instance_prompt[i])
+            print(f"instance_prompt: {self.instance_prompt[i]}")
             self._length += self.num_instance_images[i]
+            print(f"length: {self._length}")
 
             if class_data_root is not None:
                 self.class_data_root.append(Path(class_data_root[i]))
+                print(f"class_data_root: {self.class_data_root}")
                 self.class_data_root[i].mkdir(parents=True, exist_ok=True)
                 self.class_images_path.append(list(self.class_data_root[i].iterdir()))
+                print(f"class_images_path: {self.class_images_path}")
                 self.num_class_images.append(len(self.class_images_path))
+                print(f"num_class_images: {self.num_class_images}")
                 if self.num_class_images[i] > self.num_instance_images[i]:
                     self._length -= self.num_instance_images[i]
                     self._length += self.num_class_images[i]
                 self.class_prompt.append(class_prompt[i])
+                print(f"class_prompt: {self.class_prompt[i]}")
 
         self.image_transforms = transforms.Compose(
             [
@@ -635,7 +686,6 @@ class DreamBoothDataset(Dataset):
         return example
 
 
-
 def collate_fn(num_instances, examples, with_prior_preservation=False):
     input_ids = []
     pixel_values = []
@@ -661,7 +711,6 @@ def collate_fn(num_instances, examples, with_prior_preservation=False):
         "pixel_values": pixel_values,
     }
     return batch
-
 
 
 class PromptDataset(Dataset):
@@ -716,10 +765,16 @@ def main(args):
     instance_prompt = []
     class_data_dir = [] if args.with_prior_preservation else None
     class_prompt = [] if args.with_prior_preservation else None
-
     if args.concepts_list:
         with open(args.concepts_list, "r") as f:
             concepts_list = json.load(f)
+
+        if args.validation_steps:
+            args.validation_prompt = []
+            args.validation_number_images = []
+            args.validation_negative_prompt = []
+            args.validation_inference_steps = []
+            args.validation_guidance_scale = []
 
         for concept in concepts_list:
             instance_data_dir.append(concept["instance_data_dir"])
@@ -731,8 +786,25 @@ def main(args):
                     class_prompt.append(concept["class_prompt"])
                 except KeyError:
                     raise KeyError(
-                        "`class_data_dir` or `class_prompt` not found in concepts_list while using `with_prior_preservation`.")
+                        "`class_data_dir` or `class_prompt` not found in concepts_list while using "
+                        "`with_prior_preservation`."
+                    )
+            else:
+                if "class_data_dir" in concept:
+                    warnings.warn(
+                        "Ignoring `class_data_dir` key, to use it you need to enable `with_prior_preservation`."
+                    )
+                if "class_prompt" in concept:
+                    warnings.warn(
+                        "Ignoring `class_prompt` key, to use it you need to enable `with_prior_preservation`."
+                    )
 
+            if args.validation_steps:
+                args.validation_prompt.append(concept.get("validation_prompt", None))
+                args.validation_number_images.append(concept.get("validation_number_images", 4))
+                args.validation_negative_prompt.append(concept.get("validation_negative_prompt", None))
+                args.validation_inference_steps.append(concept.get("validation_inference_steps", 25))
+                args.validation_guidance_scale.append(concept.get("validation_guidance_scale", 7.5))
     else:
         # Parse instance and class inputs, and double check that lengths match
         instance_data_dir = args.instance_data_dir.split(",")
