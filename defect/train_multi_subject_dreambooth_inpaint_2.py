@@ -653,66 +653,133 @@ class DreamBoothDataset(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        self.image_transforms_resize_and_crop = transforms.Compose(
+            [
+                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+            ]
+        )
 
     def __len__(self):
         return self._length
 
     def __getitem__(self, index):
         example = {}
+        print(f"__getitem 호출 {index}")
         for i in range(len(self.instance_images_path)):
             instance_image = Image.open(self.instance_images_path[i][index % self.num_instance_images[i]])
             if not instance_image.mode == "RGB":
                 instance_image = instance_image.convert("RGB")
-            example[f"instance_images_{i}"] = self.image_transforms(instance_image)
-            example[f"instance_prompt_ids_{i}"] = self.tokenizer(
-                self.instance_prompt[i],
-                truncation=True,
-                padding="max_length",
-                max_length=self.tokenizer.model_max_length,
-                return_tensors="pt",
-            ).input_ids
+            if args.is_inpaint:
+                instance_image = self.image_transforms_resize_and_crop(instance_image)
 
-        if self.class_data_root:
-            for i in range(len(self.class_data_root)):
-                class_image = Image.open(self.class_images_path[i][index % self.num_class_images[i]])
-                if not class_image.mode == "RGB":
-                    class_image = class_image.convert("RGB")
-                example[f"class_images_{i}"] = self.image_transforms(class_image)
-                example[f"class_prompt_ids_{i}"] = self.tokenizer(
-                    self.class_prompt[i],
+                example[f"PIL_images_{i}"] = instance_image
+
+            example[f"instance_images_{i}"] = self.image_transforms(instance_image)
+
+            if args.is_inpaint:
+                example[f"instance_prompt_ids_{i}"] = self.tokenizer(
+                    self.instance_prompt,
+                    padding="do_not_pad",
+                    truncation=True,
+                    max_length=self.tokenizer.model_max_length,
+                ).input_ids
+            else:
+                example[f"instance_prompt_ids_{i}"] = self.tokenizer(
+                    self.instance_prompt[i],
                     truncation=True,
                     padding="max_length",
                     max_length=self.tokenizer.model_max_length,
                     return_tensors="pt",
                 ).input_ids
 
+        if self.class_data_root:
+            for i in range(len(self.class_data_root)):
+                class_image = Image.open(self.class_images_path[i][index % self.num_class_images[i]])
+                if not class_image.mode == "RGB":
+                    class_image = class_image.convert("RGB")
+
+                if args.is_inpaint:
+                    class_image = self.image_transforms_resize_and_crop(class_image)
+
+                example[f"class_images_{i}"] = self.image_transforms(class_image)
+                if args.is_inpaint:
+                    example[f"class_PIL_images_{i}"] = class_image
+                    example[f"class_prompt_ids_{i}"] = self.tokenizer(
+                        self.class_prompt,
+                        padding="do_not_pad",
+                        truncation=True,
+                        max_length=self.tokenizer.model_max_length,
+                    ).input_ids
+                else:
+                    example[f"class_prompt_ids_{i}"] = self.tokenizer(
+                        self.class_prompt[i],
+                        truncation=True,
+                        padding="max_length",
+                        max_length=self.tokenizer.model_max_length,
+                        return_tensors="pt",
+                    ).input_ids
+
         return example
 
 
-def collate_fn(num_instances, examples, with_prior_preservation=False):
+def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer=None):
     input_ids = []
     pixel_values = []
+    masks = []
+    masked_images = []
+    pior_pil = []
 
+    # 각 인스턴스별로 이미지와 프롬프트를 처리
     for i in range(num_instances):
         input_ids += [example[f"instance_prompt_ids_{i}"] for example in examples]
         pixel_values += [example[f"instance_images_{i}"] for example in examples]
 
-    # Concat class and instance examples for prior preservation.
-    # We do this to avoid doing two forward passes.
+        # PIL 이미지를 가져와서 마스크와 마스크된 이미지를 생성
+        for example in examples:
+            pil_image = example[f"PIL_images_{i}"]
+            # 마스크 생성 및 처리
+            mask = random_mask(pil_image.size, 1, False)
+            mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+
+            masks.append(mask)
+            masked_images.append(masked_image)
+
+    # prior preservation이 활성화된 경우, 클래스 이미지 처리
     if with_prior_preservation:
         for i in range(num_instances):
             input_ids += [example[f"class_prompt_ids_{i}"] for example in examples]
             pixel_values += [example[f"class_images_{i}"] for example in examples]
+            pior_pil = [example[f"class_PIL_images_{i}"] for example in examples]
 
+        # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
+        for pil_image in pior_pil:
+            mask = random_mask(pil_image.size, 1, False)
+            mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+
+            masks.append(mask)
+            masked_images.append(masked_image)
+
+    # 이미지와 마스크 텐서로 변환
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    input_ids = torch.cat(input_ids, dim=0)
+    if tokenizer:
+        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+    else:
+        input_ids = torch.cat(input_ids, dim=0)
 
+    masks = torch.stack(masks)
+    masked_images = torch.stack(masked_images)
+
+    # 최종 배치 생성
     batch = {
         "input_ids": input_ids,
         "pixel_values": pixel_values,
+        "masks": masks,
+        "masked_images": masked_images
     }
+
     return batch
 
 
@@ -879,12 +946,17 @@ def main(args):
                     torch_dtype = torch.float16
                 elif args.prior_generation_precision == "bf16":
                     torch_dtype = torch.bfloat16
-                pipeline = DiffusionPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path,
-                    torch_dtype=torch_dtype,
-                    safety_checker=None,
-                    revision=args.revision,
-                )
+                if args.is_inpaint:
+                    pipeline = StableDiffusionInpaintPipeline.from_pretrained(
+                        args.pretrained_model_name_or_path, torch_dtype=torch_dtype, safety_checker=None
+                    )
+                else:
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        args.pretrained_model_name_or_path,
+                        torch_dtype=torch_dtype,
+                        safety_checker=None,
+                        revision=args.revision,
+                    )
                 pipeline.set_progress_bar_config(disable=True)
 
                 num_new_images = args.num_class_images - cur_class_images
@@ -896,24 +968,46 @@ def main(args):
                 sample_dataloader = accelerator.prepare(sample_dataloader)
                 pipeline.to(accelerator.device)
 
-                for example in tqdm(
-                    sample_dataloader, desc="Generating class images", disable=not accelerator.is_local_main_process
-                ):
-                    images = pipeline(example["prompt"]).images
+                if args.is_inpaint:
+                    transform_to_pil = transforms.ToPILImage()
+                    for example in tqdm(
+                            sample_dataloader, desc="Generating class images",
+                            disable=not accelerator.is_local_main_process
+                    ):
+                        bsz = len(example["prompt"])
+                        fake_images = torch.rand((3, args.resolution, args.resolution))
+                        transform_to_pil = transforms.ToPILImage()
+                        fake_pil_images = transform_to_pil(fake_images)
+                        fake_mask = random_mask((args.resolution, args.resolution), ratio=1, mask_full_image=True)
 
-                    for ii, image in enumerate(images):
-                        hash_image = insecure_hashlib.sha1(image.tobytes()).hexdigest()
-                        image_filename = (
-                            class_images_dir / f"{example['index'][ii] + cur_class_images}-{hash_image}.jpg"
-                        )
-                        image.save(image_filename)
+                        images = pipeline(prompt=example["prompt"], mask_image=fake_mask, image=fake_pil_images).images
+                        for i, image in enumerate(images):
+                            hash_image = insecure_hashlib.sha1(image.tobytes()).hexdigest()
+                            image_filename = class_images_dir / f"{example['index'][i] + cur_class_images}-{hash_image}.jpg"
+                            image.save(image_filename)
 
-                # Clean up the memory deleting one-time-use variables.
-                del pipeline
-                del sample_dataloader
-                del sample_dataset
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    del pipeline
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                else:
+                    for example in tqdm(
+                        sample_dataloader, desc="Generating class images", disable=not accelerator.is_local_main_process
+                    ):
+                        images = pipeline(example["prompt"]).images
+
+                        for ii, image in enumerate(images):
+                            hash_image = insecure_hashlib.sha1(image.tobytes()).hexdigest()
+                            image_filename = (
+                                class_images_dir / f"{example['index'][ii] + cur_class_images}-{hash_image}.jpg"
+                            )
+                            image.save(image_filename)
+
+                    # Clean up the memory deleting one-time-use variables.
+                    del pipeline
+                    del sample_dataloader
+                    del sample_dataset
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -928,27 +1022,40 @@ def main(args):
     # Load the tokenizer
     tokenizer = None
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
+        if args.is_inpaint:
+            tokenizer = CLIPTokenizer.from_pretrained(args.tokenizer_name)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
     elif args.pretrained_model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.pretrained_model_name_or_path,
-            subfolder="tokenizer",
-            revision=args.revision,
-            use_fast=False,
+        if args.is_inpaint:
+            tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(
+                args.pretrained_model_name_or_path,
+                subfolder="tokenizer",
+                revision=args.revision,
+                use_fast=False,
+            )
+
+    if args.is_inpaint:
+        # Load models and create wrapper for stable diffusion
+        text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder")
+        vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
+        unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
+        noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    else:
+        # import correct text encoder class
+        text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
+
+        # Load scheduler and models
+        noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+        text_encoder = text_encoder_cls.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
         )
-
-    # import correct text encoder class
-    text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
-
-    # Load scheduler and models
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-    text_encoder = text_encoder_cls.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
-    )
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
-    unet = UNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
-    )
+        vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
+        unet = UNet2DConditionModel.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
+        )
 
     vae.requires_grad_(False)
     if not args.train_text_encoder:
@@ -1000,6 +1107,7 @@ def main(args):
         eps=args.adam_epsilon,
     )
 
+
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(
         instance_data_root=instance_data_dir,
@@ -1015,7 +1123,7 @@ def main(args):
         train_dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=lambda examples: collate_fn(len(instance_data_dir), examples, args.with_prior_preservation),
+        collate_fn=lambda examples: collate_fn(len(instance_data_dir), examples, args.with_prior_preservation, tokenizer),
         num_workers=1,
     )
 
@@ -1044,7 +1152,8 @@ def main(args):
         unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, optimizer, train_dataloader, lr_scheduler
         )
-
+    if args.is_inpaint:
+        accelerator.register_for_checkpointing(lr_scheduler)
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -1118,6 +1227,7 @@ def main(args):
         if args.train_text_encoder:
             text_encoder.train()
         for step, batch in enumerate(train_dataloader):
+            print(f"step, batch : {step}, {batch}")
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
@@ -1128,6 +1238,23 @@ def main(args):
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
+
+                if args.is_inpaint:
+                    # Convert masked images to latent space
+                    masked_latents = vae.encode(
+                        batch["masked_images"].reshape(batch["pixel_values"].shape).to(dtype=weight_dtype)
+                    ).latent_dist.sample()
+                    masked_latents = masked_latents * vae.config.scaling_factor
+
+                    masks = batch["masks"]
+                    # resize the mask to latents shape as we concatenate the mask to the latents
+                    mask = torch.stack(
+                        [
+                            torch.nn.functional.interpolate(mask, size=(args.resolution // 8, args.resolution // 8))
+                            for mask in masks
+                        ]
+                    )
+                    mask = mask.reshape(-1, 1, args.resolution // 8, args.resolution // 8)
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
@@ -1142,47 +1269,86 @@ def main(args):
                 # (this is the forward diffusion process)
                 noisy_latents = noise_scheduler.add_noise(latents, noise, time_steps)
 
-                # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                if args.is_inpaint:
+                    latent_model_input = torch.cat([noisy_latents, mask, masked_latents], dim=1)
+                    noise_pred = unet(latent_model_input, time_steps, encoder=text_encoder).sample
 
-                # Predict the noise residual
-                model_pred = unet(noisy_latents, time_steps, encoder_hidden_states).sample
+                    if noise_scheduler.config.prediction_type == "epsilon":
+                        target = noise
+                    elif noise_scheduler.config.prediction_type == "v_prediction":
+                        target = noise_scheduler.get_velocity(latents, noise, time_steps)
+                    else:
+                        raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-                # Get the target for loss depending on the prediction type
-                if noise_scheduler.config.prediction_type == "epsilon":
-                    target = noise
-                elif noise_scheduler.config.prediction_type == "v_prediction":
-                    target = noise_scheduler.get_velocity(latents, noise, time_steps)
+                    if args.with_prior_preservation:
+                        # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
+                        noise_pred, noise_pred_prior = torch.chunk(noise_pred, 2, dim=0)
+                        target, target_prior = torch.chunk(target, 2, dim=0)
+
+                        # Compute instance loss
+                        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="none").mean([1, 2, 3]).mean()
+
+                        prior_loss = F.mse_loss(noise_pred_prior.float(), target_prior.float(), reduction="mean")
+
+                        # Add the prior loss to the instance loss.
+                        loss = loss + args.prior_loss_weight * prior_loss
+                    else:
+                        loss = F.mse_loss(noise_pred.float(), target.float(), reduction="mean")
+
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        params_to_clip = (
+                            itertools.chain(unet.parameters(), text_encoder.parameters())
+                            if args.train_text_encoder
+                            else unet.parameters()
+                        )
+                        accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad()
                 else:
-                    raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                    # Get the text embedding for conditioning
+                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                if args.with_prior_preservation:
-                    # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                    model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
-                    target, target_prior = torch.chunk(target, 2, dim=0)
+                    # Predict the noise residual
+                    model_pred = unet(noisy_latents, time_steps, encoder_hidden_states).sample
 
-                    # Compute instance loss
-                    loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                    # Get the target for loss depending on the prediction type
+                    if noise_scheduler.config.prediction_type == "epsilon":
+                        target = noise
+                    elif noise_scheduler.config.prediction_type == "v_prediction":
+                        target = noise_scheduler.get_velocity(latents, noise, time_steps)
+                    else:
+                        raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-                    # Compute prior loss
-                    prior_loss = F.mse_loss(model_pred_prior.float(), target_prior.float(), reduction="mean")
+                    if args.with_prior_preservation:
+                        # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
+                        model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
+                        target, target_prior = torch.chunk(target, 2, dim=0)
 
-                    # Add the prior loss to the instance loss.
-                    loss = loss + args.prior_loss_weight * prior_loss
-                else:
-                    loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                        # Compute instance loss
+                        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
-                accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    params_to_clip = (
-                        itertools.chain(unet.parameters(), text_encoder.parameters())
-                        if args.train_text_encoder
-                        else unet.parameters()
-                    )
-                    accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=args.set_grads_to_none)
+                        # Compute prior loss
+                        prior_loss = F.mse_loss(model_pred_prior.float(), target_prior.float(), reduction="mean")
+
+                        # Add the prior loss to the instance loss.
+                        loss = loss + args.prior_loss_weight * prior_loss
+                    else:
+                        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        params_to_clip = (
+                            itertools.chain(unet.parameters(), text_encoder.parameters())
+                            if args.train_text_encoder
+                            else unet.parameters()
+                        )
+                        accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    optimizer.step()
+                    lr_scheduler.step()
+
+                    optimizer.zero_grad(set_to_none=args.set_grads_to_none)
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -1220,12 +1386,19 @@ def main(args):
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        pipeline = DiffusionPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            unet=accelerator.unwrap_model(unet),
-            text_encoder=accelerator.unwrap_model(text_encoder),
-            revision=args.revision,
-        )
+        if args.is_inpaint:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                text_encoder=accelerator.unwrap_model(text_encoder),
+            )
+        else:
+            pipeline = DiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                text_encoder=accelerator.unwrap_model(text_encoder),
+                revision=args.revision,
+            )
         pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
