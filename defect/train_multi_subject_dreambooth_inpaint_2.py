@@ -637,10 +637,10 @@ class DreamBoothDataset(Dataset):
                 self.class_images_path.append(list(self.class_data_root[i].iterdir()))
                 print(f"class_images_path: {self.class_images_path}")
                 self.num_class_images.append(len(self.class_images_path))
-                print(f"num_class_images: {self.num_class_images}")
                 if self.num_class_images[i] > self.num_instance_images[i]:
                     self._length -= self.num_instance_images[i]
                     self._length += self.num_class_images[i]
+                print(f"num_class_images: {self.num_class_images}")
                 self.class_prompt.append(class_prompt[i])
                 print(f"class_prompt: {self.class_prompt[i]}")
 
