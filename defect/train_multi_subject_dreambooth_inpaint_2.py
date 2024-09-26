@@ -640,6 +640,7 @@ class DreamBoothDataset(Dataset):
                 if self.num_class_images[i] > self.num_instance_images[i]:
                     self._length -= self.num_instance_images[i]
                     self._length += self.num_class_images[i]
+                    #
                 print(f"num_class_images: {self.num_class_images}")
                 self.class_prompt.append(class_prompt[i])
                 print(f"class_prompt: {self.class_prompt[i]}")
