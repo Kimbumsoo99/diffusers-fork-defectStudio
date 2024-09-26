@@ -778,7 +778,7 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
 
 
     if args.is_inpaint:
-        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, truncation=True, return_tensors="pt").input_ids
 
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
@@ -1243,7 +1243,7 @@ def main(args):
         if args.train_text_encoder:
             text_encoder.train()
         for step, batch in enumerate(train_dataloader):
-            print(f"step, batch : {step}, {batch}")
+            # print(f"step, batch : {step}, {batch}")
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
