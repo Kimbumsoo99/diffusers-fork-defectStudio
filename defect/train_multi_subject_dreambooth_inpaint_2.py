@@ -778,7 +778,10 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
 
 
     if args.is_inpaint:
-        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, truncation=True, return_tensors="pt").input_ids
+        # Apply tokenizer padding and truncation for input_ids
+        input_ids = tokenizer(
+            input_ids, padding=True, truncation=True, return_tensors="pt"
+        ).input_ids
 
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
