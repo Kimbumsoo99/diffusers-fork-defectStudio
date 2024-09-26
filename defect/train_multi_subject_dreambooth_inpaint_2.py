@@ -784,9 +784,14 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
         # Apply tokenizer padding and truncation for input_ids
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
+        for i, ids in enumerate(input_ids):
+            print(f"input_ids[{i}] length: {len(ids)}")
 
-        input_ids = tokenizer(
-            {"input_ids": input_ids}, padding=True, truncation=True, return_tensors="pt"
+        input_ids = tokenizer.pad(
+            {"input_ids": input_ids},
+            padding=True,
+            truncation=True,
+            return_tensors="pt"  # 텐서 형태로 변환
         ).input_ids
 
         # 최종 배치 생성
