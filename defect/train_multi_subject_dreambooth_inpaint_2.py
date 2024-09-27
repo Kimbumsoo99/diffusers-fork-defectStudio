@@ -687,10 +687,11 @@ class DreamBoothDataset(Dataset):
 
             if args.is_inpaint:
                 example[f"instance_prompt_ids_{i}"] = self.tokenizer(
-                    self.instance_prompt,
-                    padding="do_not_pad",
+                    self.instance_prompt[i],
                     truncation=True,
+                    padding="max_length",
                     max_length=self.tokenizer.model_max_length,
+                    return_tensors="pt",
                 ).input_ids
             else:
                 example[f"instance_prompt_ids_{i}"] = self.tokenizer(
@@ -787,12 +788,14 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
         for i, ids in enumerate(input_ids):
             print(f"input_ids[{i}] length: {len(ids)}")
 
-        input_ids = tokenizer.pad(
-            {"input_ids": input_ids},
-            padding=True,
-            truncation=True,
-            return_tensors="pt"  # 텐서 형태로 변환
-        ).input_ids
+        input_ids = torch.cat(input_ids, dim=0)
+
+        # input_ids = tokenizer.pad(
+        #     {"input_ids": input_ids},
+        #     padding=True,
+        #     truncation=True,
+        #     return_tensors="pt"  # 텐서 형태로 변환
+        # ).input_ids
 
         # 최종 배치 생성
         batch = {
@@ -1255,7 +1258,7 @@ def main(args):
         if args.train_text_encoder:
             text_encoder.train()
         for step, batch in enumerate(train_dataloader):
-            # print(f"step, batch : {step}, {batch}")
+            print(f"step, batch : {step}, {batch}")
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
@@ -1266,6 +1269,8 @@ def main(args):
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
+
+                print(f"pixel_values shape: {batch['pixel_values'].shape}")
 
                 if args.is_inpaint:
                     # Convert masked images to latent space
@@ -1298,8 +1303,10 @@ def main(args):
                 noisy_latents = noise_scheduler.add_noise(latents, noise, time_steps)
 
                 if args.is_inpaint:
+                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+
                     latent_model_input = torch.cat([noisy_latents, mask, masked_latents], dim=1)
-                    noise_pred = unet(latent_model_input, time_steps, encoder=text_encoder).sample
+                    noise_pred = unet(latent_model_input, time_steps, encoder_hidden_states).sample
 
                     if noise_scheduler.config.prediction_type == "epsilon":
                         target = noise
