@@ -715,10 +715,11 @@ class DreamBoothDataset(Dataset):
                 if args.is_inpaint:
                     example[f"class_PIL_images_{i}"] = class_image
                     example[f"class_prompt_ids_{i}"] = self.tokenizer(
-                        self.class_prompt,
-                        padding="do_not_pad",
+                        self.class_prompt[i],
                         truncation=True,
+                        padding="max_length",
                         max_length=self.tokenizer.model_max_length,
+                        return_tensors="pt",
                     ).input_ids
                 else:
                     example[f"class_prompt_ids_{i}"] = self.tokenizer(
