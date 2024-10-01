@@ -45,7 +45,6 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
-
 if is_wandb_available():
     import wandb
 
@@ -94,6 +93,7 @@ def random_mask(im_shape, ratio=1, mask_full_image=False):
             fill=255,
         )
     return mask
+
 def log_validation_images_to_tracker(
     images: List[np.array], label: str, validation_prompt: str, accelerator: Accelerator, epoch: int
 ):
@@ -456,37 +456,37 @@ def parse_args(input_args=None):
         type=str,
         default=None,
         help="A prompt that is used during validation to verify that the model is learning. You can use commas to "
-        "define multiple negative prompts. This parameter can be defined also within the file given by "
-        "`concepts_list` parameter in the respective subject.",
+             "define multiple negative prompts. This parameter can be defined also within the file given by "
+             "`concepts_list` parameter in the respective subject.",
     )
     parser.add_argument(
         "--validation_number_images",
         type=int,
         default=4,
         help="Number of images that should be generated during validation with the validation parameters given. This "
-        "can be defined within the file given by `concepts_list` parameter in the respective subject.",
+             "can be defined within the file given by `concepts_list` parameter in the respective subject.",
     )
     parser.add_argument(
         "--validation_negative_prompt",
         type=str,
         default=None,
         help="A negative prompt that is used during validation to verify that the model is learning. You can use commas"
-        " to define multiple negative prompts, each one corresponding to a validation prompt. This parameter can "
-        "be defined also within the file given by `concepts_list` parameter in the respective subject.",
+             " to define multiple negative prompts, each one corresponding to a validation prompt. This parameter can "
+             "be defined also within the file given by `concepts_list` parameter in the respective subject.",
     )
     parser.add_argument(
         "--validation_inference_steps",
         type=int,
         default=25,
         help="Number of inference steps (denoising steps) to run during validation. This can be defined within the "
-        "file given by `concepts_list` parameter in the respective subject.",
+             "file given by `concepts_list` parameter in the respective subject.",
     )
     parser.add_argument(
         "--validation_guidance_scale",
         type=float,
         default=7.5,
         help="To control how much the image generation process follows the text prompt. This can be defined within the "
-        "file given by `concepts_list` parameter in the respective subject.",
+             "file given by `concepts_list` parameter in the respective subject.",
     )
     parser.add_argument(
         "--mixed_precision",
@@ -527,7 +527,7 @@ def parse_args(input_args=None):
         type=str,
         default=None,
         help="Path to json file containing a list of multiple concepts, will overwrite parameters like instance_prompt,"
-        " class_prompt, etc.",
+             " class_prompt, etc.",
     )
 
     if input_args:
@@ -624,34 +624,34 @@ class DreamBoothDataset(Dataset):
         self._length = 0
 
         for i in range(len(instance_data_root)):
-            print(f"instance_data_root[i]: {instance_data_root[i]}")
+            # print(f"instance_data_root[i]: {instance_data_root[i]}")
             self.instance_data_root.append(Path(instance_data_root[i]))
             if not self.instance_data_root[i].exists():
                 raise ValueError("Instance images root doesn't exists.")
 
             self.instance_images_path.append(list(Path(instance_data_root[i]).iterdir()))
-            print(f"instance_images_path : {self.instance_images_path}")
+            # print(f"instance_images_path : {self.instance_images_path}")
             self.num_instance_images.append(len(self.instance_images_path[i]))
-            print(f"num_instance_images: {self.num_instance_images}")
+            # print(f"num_instance_images: {self.num_instance_images}")
             self.instance_prompt.append(instance_prompt[i])
-            print(f"instance_prompt: {self.instance_prompt[i]}")
+            # print(f"instance_prompt: {self.instance_prompt[i]}")
             self._length += self.num_instance_images[i]
-            print(f"length: {self._length}")
+            # print(f"length: {self._length}")
 
             if class_data_root is not None:
                 self.class_data_root.append(Path(class_data_root[i]))
-                print(f"class_data_root: {self.class_data_root}")
+                # print(f"class_data_root: {self.class_data_root}")
                 self.class_data_root[i].mkdir(parents=True, exist_ok=True)
                 self.class_images_path.append(list(self.class_data_root[i].iterdir()))
-                print(f"class_images_path: {self.class_images_path}")
+                # print(f"class_images_path: {self.class_images_path}")
                 self.num_class_images.append(len(self.class_images_path))
                 if self.num_class_images[i] > self.num_instance_images[i]:
                     self._length -= self.num_instance_images[i]
                     self._length += self.num_class_images[i]
                     #
-                print(f"num_class_images: {self.num_class_images}")
+                # print(f"num_class_images: {self.num_class_images}")
                 self.class_prompt.append(class_prompt[i])
-                print(f"class_prompt: {self.class_prompt[i]}")
+                # print(f"class_prompt: {self.class_prompt[i]}")
 
         self.image_transforms = transforms.Compose(
             [
@@ -673,7 +673,7 @@ class DreamBoothDataset(Dataset):
 
     def __getitem__(self, index):
         example = {}
-        print(f"__getitem 호출 {index}")
+        # print(f"__getitem 호출 {index}")
         for i in range(len(self.instance_images_path)):
             instance_image = Image.open(self.instance_images_path[i][index % self.num_instance_images[i]])
             if not instance_image.mode == "RGB":
@@ -735,6 +735,7 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
     for i in range(num_instances):
         input_ids += [example[f"instance_prompt_ids_{i}"] for example in examples]
         pixel_values += [example[f"instance_images_{i}"] for example in examples]
+        # print(f"pixel_values len : {len(pixel_values)}")
 
         if args.is_inpaint:
             # PIL 이미지를 가져와서 마스크와 마스크된 이미지를 생성
@@ -746,7 +747,7 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
 
                 masks.append(mask)
                 masked_images.append(masked_image)
-
+            # print(f"masked_images len : {len(masked_images)}")
     # prior preservation이 활성화된 경우, 클래스 이미지 처리
     if with_prior_preservation:
         for i in range(num_instances):
@@ -754,7 +755,9 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
             pixel_values += [example[f"class_images_{i}"] for example in examples]
             if args.is_inpaint:
                 pior_pil = [example[f"class_PIL_images_{i}"] for example in examples]
-
+            # print("cccc", len(example[f"class_images_{i}"]))
+            # print(f"pppp size: {example[f'class_PIL_images_{i}'].size}")
+            # print(f"pixel_values len : {len(pixel_values)}")
             if args.is_inpaint:
                 # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
                 for pil_image in pior_pil:
@@ -763,24 +766,23 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
 
                     masks.append(mask)
                     masked_images.append(masked_image)
-
-
+                    # print(f"masked_images len : {len(masked_images)}")
 
     # 이미지와 마스크 텐서로 변환
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    print("input_ids before tokenization:", input_ids)
-    print("input_ids type:", type(input_ids))
-    if len(input_ids) > 0:
-        print("Sample input_ids type:", type(input_ids[0]))
+    # print("input_ids before tokenization:", input_ids)
+    # print("input_ids type:", type(input_ids))
+    # if len(input_ids) > 0:
+    #     print("Sample input_ids type:", type(input_ids[0]))
 
     if args.is_inpaint:
         # Apply tokenizer padding and truncation for input_ids
         masks = torch.stack(masks)
         masked_images = torch.stack(masked_images)
-        for i, ids in enumerate(input_ids):
-            print(f"input_ids[{i}] length: {len(ids)}")
+        # for i, ids in enumerate(input_ids):
+        #     print(f"input_ids[{i}] length: {len(ids)}")
 
         input_ids = torch.cat(input_ids, dim=0)
 
@@ -1016,14 +1018,15 @@ def main(args):
                         torch.cuda.empty_cache()
                 else:
                     for example in tqdm(
-                        sample_dataloader, desc="Generating class images", disable=not accelerator.is_local_main_process
+                            sample_dataloader, desc="Generating class images",
+                            disable=not accelerator.is_local_main_process
                     ):
                         images = pipeline(example["prompt"]).images
 
                         for ii, image in enumerate(images):
                             hash_image = insecure_hashlib.sha1(image.tobytes()).hexdigest()
                             image_filename = (
-                                class_images_dir / f"{example['index'][ii] + cur_class_images}-{hash_image}.jpg"
+                                    class_images_dir / f"{example['index'][ii] + cur_class_images}-{hash_image}.jpg"
                             )
                             image.save(image_filename)
 
@@ -1131,7 +1134,6 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
-
 
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(
@@ -1252,7 +1254,7 @@ def main(args):
         if args.train_text_encoder:
             text_encoder.train()
         for step, batch in enumerate(train_dataloader):
-            print(f"step, batch : {step}, {batch}")
+            # print(f"step, batch : {step}, {batch}")
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
@@ -1264,7 +1266,7 @@ def main(args):
                 latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
-                print(f"pixel_values shape: {batch['pixel_values'].shape}")
+                # print(f"pixel_values shape: {batch['pixel_values'].shape}")
 
                 if args.is_inpaint:
                     # Convert masked images to latent space
