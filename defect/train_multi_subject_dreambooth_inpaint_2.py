@@ -685,22 +685,13 @@ class DreamBoothDataset(Dataset):
 
             example[f"instance_images_{i}"] = self.image_transforms(instance_image)
 
-            if args.is_inpaint:
-                example[f"instance_prompt_ids_{i}"] = self.tokenizer(
-                    self.instance_prompt[i],
-                    truncation=True,
-                    padding="max_length",
-                    max_length=self.tokenizer.model_max_length,
-                    return_tensors="pt",
-                ).input_ids
-            else:
-                example[f"instance_prompt_ids_{i}"] = self.tokenizer(
-                    self.instance_prompt[i],
-                    truncation=True,
-                    padding="max_length",
-                    max_length=self.tokenizer.model_max_length,
-                    return_tensors="pt",
-                ).input_ids
+            example[f"instance_prompt_ids_{i}"] = self.tokenizer(
+                self.instance_prompt[i],
+                truncation=True,
+                padding="max_length",
+                max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
+            ).input_ids
 
         if self.class_data_root:
             for i in range(len(self.class_data_root)):
@@ -764,14 +755,16 @@ def collate_fn(num_instances, examples, with_prior_preservation=False, tokenizer
             if args.is_inpaint:
                 pior_pil = [example[f"class_PIL_images_{i}"] for example in examples]
 
-        if args.is_inpaint:
-            # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
-            for pil_image in pior_pil:
-                mask = random_mask(pil_image.size, 1, False)
-                mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
+            if args.is_inpaint:
+                # 클래스 이미지에 대한 마스크와 마스크된 이미지 처리
+                for pil_image in pior_pil:
+                    mask = random_mask(pil_image.size, 1, False)
+                    mask, masked_image = prepare_mask_and_masked_image(pil_image, mask)
 
-                masks.append(mask)
-                masked_images.append(masked_image)
+                    masks.append(mask)
+                    masked_images.append(masked_image)
+
+
 
     # 이미지와 마스크 텐서로 변환
     pixel_values = torch.stack(pixel_values)
