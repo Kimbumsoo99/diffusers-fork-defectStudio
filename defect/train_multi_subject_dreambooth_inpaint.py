@@ -1449,7 +1449,6 @@ def main(args):
     accelerator.end_training()
     log_writer.close()
 
-
 if __name__ == "__main__":
     args = parse_args()
     main(args)
