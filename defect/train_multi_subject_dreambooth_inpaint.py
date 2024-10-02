@@ -45,6 +45,8 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
+from train_log_write import LogWriter
+
 if is_wandb_available():
     import wandb
 
@@ -828,6 +830,8 @@ class PromptDataset(Dataset):
 
 
 def main(args):
+    log_writer = LogWriter(model_path=args.output_dir)
+
     if args.report_to == "wandb" and args.hub_token is not None:
         raise ValueError(
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
@@ -1408,6 +1412,8 @@ def main(args):
                                 )
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            log_writer.write_log(num_inference_steps=global_step, train_loss=loss.detach().item(),
+                                 learning_rate=lr_scheduler.get_last_lr()[0])
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
@@ -1441,6 +1447,7 @@ def main(args):
             )
 
     accelerator.end_training()
+    log_writer.close()
 
 
 if __name__ == "__main__":
