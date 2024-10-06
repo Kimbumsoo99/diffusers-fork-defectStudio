@@ -70,6 +70,7 @@ def prepare_mask_and_masked_image(image, mask):
     masked_image = image * (mask < 0.5)
     return mask, masked_image
 
+
 # generate random masks
 def random_mask(im_shape, ratio=1, mask_full_image=False):
     mask = Image.new("L", im_shape, 0)
@@ -96,8 +97,9 @@ def random_mask(im_shape, ratio=1, mask_full_image=False):
         )
     return mask
 
+
 def log_validation_images_to_tracker(
-    images: List[np.array], label: str, validation_prompt: str, accelerator: Accelerator, epoch: int
+        images: List[np.array], label: str, validation_prompt: str, accelerator: Accelerator, epoch: int
 ):
     logger.info(f"Logging images to tracker for validation prompt: {validation_prompt}.")
 
@@ -119,13 +121,13 @@ def log_validation_images_to_tracker(
 # TODO: Add `prompt_embeds` and `negative_prompt_embeds` parameters to the function when `pre_compute_text_embeddings`
 #  argument is implemented.
 def generate_validation_images(
-    text_encoder: Module,
-    tokenizer: Module,
-    unet: Module,
-    vae: Module,
-    arguments: argparse.Namespace,
-    accelerator: Accelerator,
-    weight_dtype: dtype,
+        text_encoder: Module,
+        tokenizer: Module,
+        unet: Module,
+        vae: Module,
+        arguments: argparse.Namespace,
+        accelerator: Accelerator,
+        weight_dtype: dtype,
 ):
     logger.info("Running validation images.")
 
@@ -169,11 +171,11 @@ def generate_validation_images(
 
     images_sets = []
     for vp, nvi, vnp, vis, vgs in zip(
-        arguments.validation_prompt,
-        arguments.validation_number_images,
-        arguments.validation_negative_prompt,
-        arguments.validation_inference_steps,
-        arguments.validation_guidance_scale,
+            arguments.validation_prompt,
+            arguments.validation_number_images,
+            arguments.validation_negative_prompt,
+            arguments.validation_inference_steps,
+            arguments.validation_guidance_scale,
     ):
         images = []
         if vp is not None:
@@ -228,6 +230,12 @@ def parse_args(input_args=None):
         default=False,
         action="store_true",
         help="Multi Subject + Inpainting Model Training by bumsoo",
+    )
+    parser.add_argument(
+        "--gpu_device",
+        type=int,  # GPU는 일반적으로 인덱스로 지정되므로 정수형 타입으로 설정
+        default=0,  # 기본값은 0번 GPU로 설정
+        help="The GPU device to use for training."
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
@@ -334,7 +342,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--checkpointing_steps",
         type=int,
-        default=500,
+        default=2000,
         help=(
             "Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
             " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
@@ -602,14 +610,14 @@ class DreamBoothDataset(Dataset):
     """
 
     def __init__(
-        self,
-        instance_data_root,
-        instance_prompt,
-        tokenizer,
-        class_data_root=None,
-        class_prompt=None,
-        size=512,
-        center_crop=False,
+            self,
+            instance_data_root,
+            instance_prompt,
+            tokenizer,
+            class_data_root=None,
+            class_prompt=None,
+            size=512,
+            center_crop=False,
     ):
         self.size = size
         self.center_crop = center_crop
@@ -831,6 +839,8 @@ class PromptDataset(Dataset):
 
 def main(args):
     log_writer = LogWriter(model_path=args.output_dir)
+
+    torch.cuda.set_device(args.gpu_device)
 
     if args.report_to == "wandb" and args.hub_token is not None:
         raise ValueError(
@@ -1111,7 +1121,7 @@ def main(args):
 
     if args.scale_lr:
         args.learning_rate = (
-            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+                args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
@@ -1154,7 +1164,8 @@ def main(args):
         train_dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=lambda examples: collate_fn(len(instance_data_dir), examples, args.with_prior_preservation, tokenizer),
+        collate_fn=lambda examples: collate_fn(len(instance_data_dir), examples, args.with_prior_preservation,
+                                               tokenizer),
         num_workers=1,
     )
 
@@ -1253,6 +1264,10 @@ def main(args):
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")
 
+    total_steps_per_epoch = len(train_dataloader)  # 각 에포크당 step 수
+    max_train_steps = args.max_train_steps if args.max_train_steps else total_steps_per_epoch * args.num_train_epochs
+    print(f"total_steps_per_epoch {total_steps_per_epoch}")
+    print(f"max_train_steps {max_train_steps}")
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         if args.train_text_encoder:
@@ -1397,9 +1412,9 @@ def main(args):
                         logger.info(f"Saved state to {save_path}")
 
                     if (
-                        args.validation_steps
-                        and any(args.validation_prompt)
-                        and global_step % args.validation_steps == 0
+                            args.validation_steps
+                            and any(args.validation_prompt)
+                            and global_step % args.validation_steps == 0
                     ):
                         images_set = generate_validation_images(
                             text_encoder, tokenizer, unet, vae, args, accelerator, weight_dtype
@@ -1413,7 +1428,9 @@ def main(args):
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             log_writer.write_log(num_inference_steps=global_step, train_loss=loss.detach().item(),
-                                 learning_rate=lr_scheduler.get_last_lr()[0])
+                                 learning_rate=lr_scheduler.get_last_lr()[0],
+                                 max_train_steps=max_train_steps,
+                                 progress=global_step / max_train_steps)
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 
@@ -1449,6 +1466,8 @@ def main(args):
     accelerator.end_training()
     log_writer.close()
 
+
 if __name__ == "__main__":
     args = parse_args()
+    print(args)
     main(args)
